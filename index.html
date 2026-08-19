@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gmail Cuan - Aplikasi Manajemen Tugas & Wallet</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel CDN -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #090d16;
+            color: #f1f5f9;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- ENKRIPSI KATA SANDI (Hashed Password Simulation) ---
+        const hashPass = (str) => {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = (hash << 5) - hash + str.charCodeAt(i);
+                hash |= 0;
+            }
+            return 'sec_' + Math.abs(hash).toString(16);
+        };
+
+        // --- DATA AWAL APLIKASI ---
+        const DEFAULT_OWNER = {
+            username: "owner",
+            phone: "080000000000",
+            passHash: hashPass("owner123")
+        };
+
+        const DEFAULT_RATES = [
+            { min: 1, max: 10, rate: 4000 },
+            { min: 11, max: 30, rate: 4500 },
+            { min: 31, max: 100, rate: 5000 }
+        ];
+
+        function App() {
+            // Persistent State (Local Storage Sync)
+            const [owner, setOwner] = useState(() => {
+                const s = localStorage.getItem('gc_owner');
+                return s ? JSON.parse(s) : DEFAULT_OWNER;
+            });
+
+            const [users, setUsers] = useState(() => {
+                const s = localStorage.getItem('gc_users');
+                return s ? JSON.parse(s) : [
+                    { id: "USR-101", name: "Budi Santoso", phone: "081234567890", passHash: hashPass("123456"), paid: true, balance: 15000, joined: "2026-02-10", referredBy: null }
+                ];
+            });
+
+            const [rates, setRates] = useState(() => {
+                const s = localStorage.getItem('gc_rates');
+                return s ? JSON.parse(s) : DEFAULT_RATES;
+            });
+
+            const [appSettings, setAppSettings] = useState(() => {
+                const s = localStorage.getItem('gc_settings');
+                return s ? JSON.parse(s) : {
+                    regFee: 4000,
+                    qrUrl: "https://via.placeholder.com/250?text=Scan+QRIS+Rp4.000",
+                    waGroupUrl: "https://chat.whatsapp.com/demo",
+                    waBonus: 1000,
+                    referralBonus: 2000,
+                    minWithdraw: 20000,
+                    adminFee: 1000,
+                    appShareUrl: "https://gmailcuan.github.io",
+                    tutorialLink: "https://drive.google.com/drive/folders/1t5xnVnJcqoQmszmPQ7VtxsHJll42zeL4",
+                    gmailRulesText: "Format wajib: nama_acak123@gmail.com. Pastikan verifikasi 2 langkah belum diaktifkan.",
+                    walletMethods: ["DANA", "OVO", "GoPay", "ShopeePay", "Transfer Bank", "USDT"],
+                    maintenance: false
+                };
+            });
+
+            const [gmails, setGmails] = useState(() => {
+                const s = localStorage.getItem('gc_gmails');
+                return s ? JSON.parse(s) : [];
+            });
+
+            const [withdrawals, setWithdrawals] = useState(() => {
+                const s = localStorage.getItem('gc_withdrawals');
+                return s ? JSON.parse(s) : [];
+            });
+
+            const [referralClaims, setReferralClaims] = useState(() => {
+                const s = localStorage.getItem('gc_ref_claims');
+                return s ? JSON.parse(s) : [];
+            });
+
+            const [notifs, setNotifs] = useState(() => {
+                const s = localStorage.getItem('gc_notifs');
+                return s ? JSON.parse(s) : [];
+            });
+
+            const [currentUser, setCurrentUser] = useState(null); // null, 'OWNER', atau Object User
+            const [activeTab, setActiveTab] = useState('home');
+            const [menuOpen, setMenuOpen] = useState(false);
+
+            // Sync LocalStorage
+            useEffect(() => localStorage.setItem('gc_owner', JSON.stringify(owner)), [owner]);
+            useEffect(() => localStorage.setItem('gc_users', JSON.stringify(users)), [users]);
+            useEffect(() => localStorage.setItem('gc_rates', JSON.stringify(rates)), [rates]);
+            useEffect(() => localStorage.setItem('gc_settings', JSON.stringify(appSettings)), [appSettings]);
+            useEffect(() => localStorage.setItem('gc_gmails', JSON.stringify(gmails)), [gmails]);
+            useEffect(() => localStorage.setItem('gc_withdrawals', JSON.stringify(withdrawals)), [withdrawals]);
+            useEffect(() => localStorage.setItem('gc_ref_claims', JSON.stringify(referralClaims)), [referralClaims]);
+            useEffect(() => localStorage.setItem('gc_notifs', JSON.stringify(notifs)), [notifs]);
+
+            const addNotif = (targetId, title, message) => {
+                const n = { id: Date.now(), targetId, title, message, time: new Date().toLocaleString('id-ID'), read: false };
+                setNotifs(prev => [n, ...prev]);
+            };
+
+            const handleLogout = () => {
+                setCurrentUser(null);
+                setActiveTab('home');
+                setMenuOpen(false);
+            };
+
+            if (appSettings.maintenance && currentUser !== 'OWNER') {
+                return (
+                    <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center bg-slate-950 text-white">
+                        <div class="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mb-4 border border-amber-500/20 text-2xl">
+                            ⚠️
+                        </div>
+                        <h1 class="text-xl font-bold mb-2">Sistem Dalam Pemeliharaan</h1>
+                        <p class="text-slate-400 text-xs max-w-sm mb-6">Website sedang dalam perbaikan berkala oleh Owner. Silakan kembali beberapa saat lagi.</p>
+                        <button onClick={() => setCurrentUser('OWNER_LOGIN')} class="text-xs text-slate-500 hover:text-slate-300 underline">Akses Owner</button>
+                    </div>
+                );
+            }
+
+            return (
+                <div class="max-w-md sm:max-w-xl md:max-w-3xl lg:max-w-5xl mx-auto min-h-screen bg-slate-950 text-slate-100 flex flex-col shadow-2xl relative border-x border-slate-800/80">
+                    
+                    {/* NAVBAR ATAS */}
+                    <header class="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center font-black text-white shadow-lg shadow-indigo-500/20">
+                                GC
+                            </div>
+                            <div>
+                                <h1 class="font-extrabold text-base leading-tight tracking-wide text-white">GMAIL CUAN</h1>
+                                <p class="text-[10px] text-slate-400">
+                                    {currentUser === 'OWNER' ? 'Panel Kontrol Owner' : currentUser ? `Pengguna: ${currentUser.name}` : 'Login & Pendaftaran'}
+                                </p>
+                            </div>
+                        </div>
+
+                        {currentUser && (
+                            <button onClick={() => setMenuOpen(!menuOpen)} class="p-2 bg-slate-800/80 hover:bg-slate-700 rounded-xl text-slate-300">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path></svg>
+                            </button>
+                        )}
+                    </header>
+
+                    {/* MENU POPUP TITIK TIGA (⋮) */}
+                    {menuOpen && currentUser && (
+                        <div class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end" onClick={() => setMenuOpen(false)}>
+                            <div class="w-80 bg-slate-900 h-full border-l border-slate-800 p-5 flex flex-col justify-between shadow-2xl" onClick={e => e.stopPropagation()}>
+                                <div>
+                                    <div class="flex justify-between items-center pb-4 mb-4 border-b border-slate-800">
+                                        <h3 class="font-bold text-lg text-white">Menu Akun</h3>
+                                        <button onClick={() => setMenuOpen(false)} class="text-slate-400 hover:text-white">✕</button>
+                                    </div>
+
+                                    <div class="bg-slate-800/50 p-3.5 rounded-xl mb-4 text-xs space-y-2 border border-slate-700/50">
+                                        <div>
+                                            <p class="text-slate-400">Nama Akun:</p>
+                                            <p class="font-bold text-slate-100">{currentUser === 'OWNER' ? owner.username : currentUser.name}</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-slate-400">Nomor HP:</p>
+                                            <p class="font-mono text-indigo-400 font-semibold">{currentUser === 'OWNER' ? owner.phone : currentUser.phone}</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-slate-400">ID Akun:</p>
+                                            <p class="font-mono text-slate-300">{currentUser === 'OWNER' ? 'OWNER-MAIN' : currentUser.id}</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="space-y-2 text-xs">
+                                        <button onClick={() => alert("Aturan Aplikasi: Seluruh pendaftaran & tugas wajib mematuhi panduan Owner.")} class="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800 text-slate-300">
+                                            Ketentuan Layanan
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="pt-4 border-t border-slate-800 space-y-2">
+                                    {currentUser !== 'OWNER' && (
+                                        <button 
+                                            onClick={() => {
+                                                if (confirm("Yakin ingin menghapus akun Anda? Seluruh saldo akan hangus.")) {
+                                                    setUsers(users.filter(u => u.id !== currentUser.id));
+                                                    handleLogout();
+                                                }
+                                            }}
+                                            class="w-full py-2 bg-red-500/10 text-red-400 rounded-xl text-xs hover:bg-red-500/20"
+                                        >
+                                            Hapus Akun Saya
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={handleLogout}
+                                        class="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-500"
+                                    >
+                                        Keluar / Logout
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ROUTING APPLIKASI UTAMA */}
+                    <main class="flex-1 p-4 pb-24 overflow-y-auto">
+                        {!currentUser ? (
+                            <AuthView 
+                                users={users} 
+                                setUsers={setUsers} 
+                                owner={owner}
+                                setCurrentUser={setCurrentUser} 
+                                addNotif={addNotif}
+                            />
+                        ) : currentUser === 'OWNER' ? (
+                            <OwnerDashboard 
+                                owner={owner}
+                                setOwner={setOwner}
+                                users={users} 
+                                setUsers={setUsers} 
+                                rates={rates}
+                                setRates={setRates}
+                                appSettings={appSettings}
+                                setAppSettings={setAppSettings}
+                                gmails={gmails}
+                                setGmails={setGmails}
+                                withdrawals={withdrawals}
+                                setWithdrawals={setWithdrawals}
+                                activeTab={activeTab}
+                                addNotif={addNotif}
+                            />
+                        ) : (
+                            <UserDashboard 
+                                user={currentUser} 
+                                setUser={setCurrentUser}
+                                rates={rates}
+                                appSettings={appSettings} 
+                                gmails={gmails}
+                                setGmails={setGmails}
+                                withdrawals={withdrawals}
+                                setWithdrawals={setWithdrawals}
+                                referralClaims={referralClaims}
+                                setReferralClaims={setReferralClaims}
+                                activeTab={activeTab}
+                                setActiveTab={setActiveTab}
+                                addNotif={addNotif}
+                                users={users}
+                            />
+                        )}
+                    </main>
+
+                    {/* BOTTOM NAVBAR (6 MENU OWNER & 6 MENU PENGGUNA) */}
+                    {currentUser && (
+                        <nav class="fixed bottom-0 left-0 right-0 max-w-md sm:max-w-xl md:max-w-3xl lg:max-w-5xl mx-auto bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex justify-around py-2 z-30">
+                            {currentUser === 'OWNER' ? (
+                                <>
+                                    <NavBtn label="Beranda" tab="home" activeTab={activeTab} setActiveTab={setActiveTab} icon="📊" />
+                                    <NavBtn label="Kegiatan" tab="activities" activeTab={activeTab} setActiveTab={setActiveTab} icon="📌" />
+                                    <NavBtn label="Anggota" tab="members" activeTab={activeTab} setActiveTab={setActiveTab} icon="👥" />
+                                    <NavBtn label="Rules" tab="rules" activeTab={activeTab} setActiveTab={setActiveTab} icon="⚙️" />
+                                    <NavBtn label="Gmail" tab="gmails" activeTab={activeTab} setActiveTab={setActiveTab} icon="✉️" />
+                                    <NavBtn label="Wallet" tab="withdraws" activeTab={activeTab} setActiveTab={setActiveTab} icon="💳" />
+                                </>
+                            ) : (
+                                <>
+                                    <NavBtn label="Beranda" tab="home" activeTab={activeTab} setActiveTab={setActiveTab} icon="🏠" />
+                                    <NavBtn label="Tugas" tab="tasks" activeTab={activeTab} setActiveTab={setActiveTab} icon="📋" />
+                                    <NavBtn label="Kalkulator" tab="calc" activeTab={activeTab} setActiveTab={setActiveTab} icon="🧮" />
+                                    <NavBtn label="Undang" tab="referral" activeTab={activeTab} setActiveTab={setActiveTab} icon="🎁" />
+                                    <NavBtn label="Wallet" tab="wallet" activeTab={activeTab} setActiveTab={setActiveTab} icon="💰" />
+                                    <NavBtn label="Riwayat" tab="history" activeTab={activeTab} setActiveTab={setActiveTab} icon="📜" />
+                                </>
+                            )}
+                        </nav>
+                    )}
+                </div>
+            );
+        }
+
+        function NavBtn({ label, tab, activeTab, setActiveTab, icon }) {
+            const isActive = activeTab === tab;
+            return (
+                <button 
+                    onClick={() => setActiveTab(tab)}
+                    class={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
+                        isActive ? 'text-indigo-400 font-bold scale-105' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                >
+                    <span class="text-base">{icon}</span>
+                    <span class="text-[10px] mt-0.5">{label}</span>
+                </button>
+            );
+        }
+
+        // ==========================================
+        // 1. SYSTEM LOGIN, DAFTAR & LUPA AKUN
+        // ==========================================
+        function AuthView({ users, setUsers, owner, setCurrentUser, addNotif }) {
+            const [mode, setMode] = useState('LOGIN'); // 'LOGIN', 'REGISTER', 'FORGOT', 'OWNER_LOGIN'
+            const [phone, setPhone] = useState('');
+            const [password, setPassword] = useState('');
+            const [fullName, setFullName] = useState('');
+            const [refCode, setRefCode] = useState('');
+            const [otpInput, setOtpInput] = useState('');
+            const [generatedOtp, setGeneratedOtp] = useState('');
+            const [ownerUsername, setOwnerUsername] = useState('');
+
+            // Kirim OTP WA Otomatis
+            const handleSendOTP = () => {
+                if (!phone || phone.length < 9) {
+                    alert("Masukkan nomor WhatsApp yang valid!");
+                    return;
+                }
+                const code = Math.floor(100000 + Math.random() * 900000).toString();
+                setGeneratedOtp(code);
+
+                const msg = encodeURIComponent(`[GMAIL CUAN] Kode OTP Anda adalah: ${code}`);
+                window.open(`https://wa.me/${phone.replace(/^0/, '62')}?text=${msg}`, '_blank');
+                alert(`Kode OTP (${code}) dibuka di WhatsApp. Silakan cek pesan Anda!`);
+            };
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const hashed = hashPass(password);
+
+                if (phone === owner.phone && hashed === owner.passHash) {
+                    setCurrentUser('OWNER');
+                    return;
+                }
+
+                const found = users.find(u => u.phone === phone && u.passHash === hashed);
+                if (found) {
+                    setCurrentUser(found);
+                } else {
+                    alert("Nomor HP atau Kata Sandi salah/belum terdaftar!");
+                }
+            };
+
+            const handleOwnerLogin = (e) => {
+                e.preventDefault();
+                if (ownerUsername === owner.username && hashPass(password) === owner.passHash) {
+                    setCurrentUser('OWNER');
+                } else {
+                    alert("Kredensial khusus Owner salah!");
+                }
+            };
+
+            const handleRegister = (e) => {
+                e.preventDefault();
+                if (otpInput !== generatedOtp) {
+                    alert("Kode OTP WhatsApp tidak sesuai!");
+                    return;
+                }
+                if (users.some(u => u.phone === phone)) {
+                    alert("Nomor HP sudah terdaftar sebelumnya!");
+                    return;
+                }
+
+                const newUser = {
+                    id: "USR-" + Math.floor(1000 + Math.random() * 9000),
+                    name: fullName,
+                    phone: phone,
+                    passHash: hashPass(password),
+                    paid: false,
+                    balance: 0,
+                    joined: new Date().toISOString().split('T')[0],
+                    referredBy: refCode.trim() || null
+                };
+
+                setUsers([...users, newUser]);
+                addNotif('OWNER', 'Pendaftaran Baru', `${fullName} (${phone}) telah mendaftar.`);
+                alert("Pendaftaran Berhasil! Silakan masuk ke akun Anda.");
+                setMode('LOGIN');
+            };
+
+            const handleResetPass = (e) => {
+                e.preventDefault();
+                if (otpInput !== generatedOtp) {
+                    alert("Kode OTP WhatsApp tidak sesuai!");
+                    return;
+                }
+                const userIdx = users.findIndex(u => u.phone === phone);
+                if (userIdx === -1) {
+                    alert("Nomor HP tidak ditemukan di database!");
+                    return;
+                }
+
+                const updated = [...users];
+                updated[userIdx].passHash = hashPass(password);
+                setUsers(updated);
+                alert("Kata sandi berhasil diperbarui! Silakan login.");
+                setMode('LOGIN');
+            };
+
+            return (
+                <div class="flex flex-col justify-center min-h-[75vh] px-2 py-6">
+                    <div class="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl max-w-md mx-auto w-full">
+                        
+                        {mode === 'LOGIN' && (
+                            <form onSubmit={handleLogin} class="space-y-4">
+                                <div class="text-center mb-6">
+                                    <h2 class="text-2xl font-bold text-white">Selamat Datang</h2>
+                                    <p class="text-xs text-slate-400 mt-1">Masuk untuk mulai mengerjakan tugas & klaim saldo</p>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">Nomor HP / WhatsApp</label>
+                                    <input type="tel" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="08xxxxxxxxxx" class="w-full px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm focus:border-indigo-500" />
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">Kata Sandi</label>
+                                    <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" class="w-full px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm focus:border-indigo-500" />
+                                </div>
+
+                                <button type="submit" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 font-bold rounded-xl text-sm transition shadow-lg shadow-indigo-600/30">
+                                    Masuk Ke Akun
+                                </button>
+
+                                <div class="flex justify-between items-center text-xs pt-4 border-t border-slate-800">
+                                    <button type="button" onClick={() => setMode('REGISTER')} class="text-indigo-400 hover:underline">Daftar Akun</button>
+                                    <button type="button" onClick={() => setMode('FORGOT')} class="text-slate-400 hover:underline">Lupa Akun?</button>
+                                </div>
+
+                                <div class="text-center pt-2">
+                                    <button type="button" onClick={() => setMode('OWNER_LOGIN')} class="text-[11px] text-slate-500 hover:text-slate-400">
+                                        Login Akses Khusus Owner
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+
+                        {mode === 'REGISTER' && (
+                            <form onSubmit={handleRegister} class="space-y-3.5">
+                                <div class="text-center mb-4">
+                                    <h2 class="text-xl font-bold text-white">Daftar Akun Baru</h2>
+                                    <p class="text-xs text-slate-400">Lengkapi data pendaftaran Anda</p>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">1. Nama Lengkap</label>
+                                    <input type="text" required value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Sesuai KTP/ID" class="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm" />
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">2. Nomor WhatsApp</label>
+                                    <div class="flex space-x-2">
+                                        <input type="tel" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="08xxxxxxxxxx" class="flex-1 px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm" />
+                                        <button type="button" onClick={handleSendOTP} class="px-3 py-2 bg-emerald-600 text-xs font-bold rounded-xl text-white whitespace-nowrap">
+                                            Kirim OTP WA
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">3. Masukkan Kode OTP</label>
+                                    <input type="text" required value={otpInput} onChange={e => setOtpInput(e.target.value)} placeholder="6 Digit OTP" class="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm font-bold text-center tracking-widest" />
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">4. Kode Referral / Undang (Opsional)</label>
+                                    <input type="text" value={refCode} onChange={e => setRefCode(e.target.value)} placeholder="Contoh: USR-101" class="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm font-mono text-indigo-400" />
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">5. Buat Kata Sandi Baru</label>
+                                    <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" class="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm" />
+                                </div>
+
+                                <button type="submit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 font-bold rounded-xl text-sm transition">
+                                    Buat Akun Sekarang
+                                </button>
+
+                                <div class="text-center pt-2">
+                                    <button type="button" onClick={() => setMode('LOGIN')} class="text-xs text-slate-400 hover:underline">Kembali ke Halaman Login</button>
+                                </div>
+                            </form>
+                        )}
+
+                        {mode === 'FORGOT' && (
+                            <form onSubmit={handleResetPass} class="space-y-4">
+                                <div class="text-center mb-4">
+                                    <h2 class="text-xl font-bold text-white">Reset Kata Sandi</h2>
+                                    <p class="text-xs text-slate-400">Verifikasi nomor WhatsApp terdaftar</p>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">Nomor WhatsApp Terdaftar</label>
+                                    <div class="flex space-x-2">
+                                        <input type="tel" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="08xxxxxxxxxx" class="flex-1 px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm" />
+                                        <button type="button" onClick={handleSendOTP} class="px-3 py-2 bg-indigo-600 text-xs font-bold rounded-xl text-white">
+                                            Kirim OTP
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">Masukkan Kode OTP</label>
+                                    <input type="text" required value={otpInput} onChange={e => setOtpInput(e.target.value)} placeholder="6 Digit OTP" class="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm" />
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">Kata Sandi Baru</label>
+                                    <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" class="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm" />
+                                </div>
+
+                                <button type="submit" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 font-bold rounded-xl text-sm">
+                                    Simpan Sandi Baru
+                                </button>
+
+                                <div class="p-3 bg-slate-800/60 rounded-2xl text-xs space-y-1 mt-4 border border-slate-700/50">
+                                    <p class="font-bold text-amber-400">Lupa Nomor HP?</p>
+                                    <p class="text-slate-400 text-[11px]">Bila Anda lupa nomor HP terdaftar, silakan kirimkan laporan bantuan ke Owner.</p>
+                                    <button 
+                                        type="button" 
+                                        onClick={() => {
+                                            addNotif('OWNER', 'Bantuan Lupa Nomor HP', 'Seorang anggota meminta bantuan karena lupa nomor HP terdaftar.');
+                                            alert("Laporan bantuan telah dikirimkan ke Owner!");
+                                        }}
+                                        class="text-indigo-400 font-semibold hover:underline"
+                                    >
+                                        Hubungi & Laporkan ke Owner
+                                    </button>
+                                </div>
+
+                                <div class="text-center pt-2">
+                                    <button type="button" onClick={() => setMode('LOGIN')} class="text-xs text-slate-400 hover:underline">Kembali ke Halaman Login</button>
+                                </div>
+                            </form>
+                        )}
+
+                        {mode === 'OWNER_LOGIN' && (
+                            <form onSubmit={handleOwnerLogin} class="space-y-4">
+                                <div class="text-center mb-4">
+                                    <h2 class="text-xl font-bold text-indigo-400">Akses Terproteksi Owner</h2>
+                                    <p class="text-xs text-slate-400">Username: owner | Sandi: owner123</p>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">Username Owner</label>
+                                    <input type="text" required value={ownerUsername} onChange={e => setOwnerUsername(e.target.value)} placeholder="Username" class="w-full px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm" />
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+                                    <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" class="w-full px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm" />
+                                </div>
+
+                                <button type="submit" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 font-bold rounded-xl text-sm">
+                                    Masuk Ke Panel Owner
+                                </button>
+
+                                <div class="text-center pt-2">
+                                    <button type="button" onClick={() => setMode('LOGIN')} class="text-xs text-slate-400 hover:underline">Kembali ke Login Pengguna</button>
+                                </div>
+                            </form>
+                        )}
+
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // 2. PANEL OWNER / ADMIN (MURNI SPESIFIKASI)
+        // ==========================================
+        function OwnerDashboard({ owner, setOwner, users, setUsers, rates, setRates, appSettings, setAppSettings, gmails, setGmails, withdrawals, setWithdrawals, activeTab, addNotif }) {
+            const [ownerPhone, setOwnerPhone] = useState(owner.phone);
+            const [ownerPass, setOwnerPass] = useState('');
+
+            // MENU 1: BERANDA OWNER
+            if (activeTab === 'home') {
+                return (
+                    <div class="space-y-5">
+                        <div class="bg-indigo-950/40 border border-indigo-900/50 p-4 rounded-2xl flex justify-between items-center">
+                            <div>
+                                <h2 class="text-lg font-bold text-white">Panel Kontrol Owner</h2>
+                                <p class="text-xs text-indigo-300">Ringkasan aktivitas seluruh sistem</p>
+                            </div>
+                            <button 
+                                onClick={() => setAppSettings({...appSettings, maintenance: !appSettings.maintenance})}
+                                class={`px-3 py-1.5 text-xs font-bold rounded-lg ${appSettings.maintenance ? 'bg-red-600' : 'bg-slate-800 border border-slate-700'}`}
+                            >
+                                {appSettings.maintenance ? 'Maintenance ON' : 'Status: Normal'}
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                                <p class="text-xs text-slate-400">Total Pengguna</p>
+                                <p class="text-2xl font-black text-white">{users.length}</p>
+                            </div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                                <p class="text-xs text-slate-400">Total Saldo Pengguna</p>
+                                <p class="text-xl font-bold text-emerald-400">Rp{users.reduce((a,b)=>a+b.balance,0).toLocaleString()}</p>
+                            </div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                                <p class="text-xs text-slate-400">Total Gmail Masuk</p>
+                                <p class="text-xl font-bold text-indigo-400">{gmails.length}</p>
+                            </div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                                <p class="text-xs text-slate-400">Permintaan WD</p>
+                                <p class="text-xl font-bold text-amber-400">{withdrawals.filter(w=>w.status==='Menunggu').length}</p>
+                            </div>
+                        </div>
+
+                        {/* Pengaturan Akun Owner */}
+                        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">
+                            <h3 class="font-bold text-sm text-indigo-400">Ubah Kredensial Akun Owner</h3>
+                            <div>
+                                <label class="block text-xs text-slate-400 mb-1">Nomor HP Owner</label>
+                                <input type="text" value={ownerPhone} onChange={e => setOwnerPhone(e.target.value)} class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs font-mono" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-400 mb-1">Sandi Baru Owner (Kosongkan jika tidak diubah)</label>
+                                <input type="password" value={ownerPass} onChange={e => setOwnerPass(e.target.value)} placeholder="••••••••" class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs" />
+                            </div>
+                            <button 
+                                onClick={() => {
+                                    setOwner({
+                                        ...owner,
+                                        phone: ownerPhone,
+                                        passHash: ownerPass ? hashPass(ownerPass) : owner.passHash
+                                    });
+                                    alert("Kredensial Owner berhasil diperbarui!");
+                                }}
+                                class="w-full py-2 bg-indigo-600 font-bold text-xs rounded-xl"
+                            >
+                                Simpan Kredensial Owner
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            // MENU 2: KEGIATAN & QR
+            if (activeTab === 'activities') {
+                return (
+                    <div class="space-y-4">
+                        <h2 class="text-lg font-bold text-white">Kegiatan, QR & Referral</h2>
+                        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">
+                            <div>
+                                <label class="block text-xs text-slate-400 mb-1">URL Link Website / Aplikasi (Untuk Menu Undang)</label>
+                                <input type="text" value={appSettings.appShareUrl} onChange={e => setAppSettings({...appSettings, appShareUrl: e.target.value})} class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs font-mono text-indigo-300" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-400 mb-1">Nominal Bonus Referral / Undang (Rp)</label>
+                                <input type="number" value={appSettings.referralBonus} onChange={e => setAppSettings({...appSettings, referralBonus: parseInt(e.target.value)||0})} class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs font-bold text-emerald-400" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-400 mb-1">URL QR Pembayaran Pendaftaran</label>
+                                <input type="text" value={appSettings.qrUrl} onChange={e => setAppSettings({...appSettings, qrUrl: e.target.value})} class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-400 mb-1">Biaya Pendaftaran (Rp)</label>
+                                <input type="number" value={appSettings.regFee} onChange={e => setAppSettings({...appSettings, regFee: parseInt(e.target.value)||0})} class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs font-bold text-emerald-400" />
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // MENU 3: ANGGOTA
+            if (activeTab === 'members') {
+                return (
+                    <div class="space-y-3">
+                        <h2 class="text-lg font-bold text-white">Data Seluruh Anggota ({users.length})</h2>
+                        {users.map(u => (
+                            <div key={u.id} class="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl flex items-center justify-between">
+                                <div>
+                                    <p class="font-bold text-sm text-white">{u.name}</p>
+                                    <p class="text-xs text-slate-400">{u.phone} • ID: {u.id}</p>
+                                    <p class="text-xs text-indigo-400 font-semibold mt-0.5">Saldo: Rp{u.balance.toLocaleString()}</p>
+                                </div>
+                                <div class="flex space-x-1">
+                                    {!u.paid && (
+                                        <button onClick={() => {
+                                            setUsers(users.map(item => item.id === u.id ? {...item, paid: true} : item));
+                                            addNotif(u.id, 'Pembayaran Diverifikasi', 'Pembayaran QRIS pendaftaran Anda telah dikonfirmasi Owner!');
+                                        }} class="px-2.5 py-1 bg-emerald-600 text-[10px] font-bold rounded-lg">Verifikasi QR</button>
+                                    )}
+                                    <button onClick={() => {
+                                        if(confirm(`Yakin hapus akun ${u.name}?`)) {
+                                            setUsers(users.filter(item => item.id !== u.id));
+                                        }
+                                    }} class="px-2.5 py-1 bg-red-600/20 text-red-400 text-[10px] font-bold rounded-lg">Hapus</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                );
+            }
+
+            // MENU 4: RULES & RATE GMAIL
+            if (activeTab === 'rules') {
+                return (
+                    <div class="space-y-4">
+                        <h2 class="text-lg font-bold text-white">Pengaturan Rate & Aturan Gmail</h2>
+                        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">
+                            <h3 class="text-xs font-bold text-slate-300">Tabel Rate Per Gmail</h3>
+                            {rates.map((r, idx) => (
+                                <div key={idx} class="flex items-center space-x-2 bg-slate-800/50 p-2 rounded-xl text-xs">
+                                    <span class="w-24 text-slate-400">{r.min}-{r.max} Gmail:</span>
+                                    <span class="font-bold text-emerald-400">Rp</span>
+                                    <input 
+                                        type="number" 
+                                        value={r.rate} 
+                                        onChange={e => {
+                                            const updated = [...rates];
+                                            updated[idx].rate = parseInt(e.target.value)||0;
+                                            setRates(updated);
+                                        }} 
+                                        class="w-full bg-slate-800 border border-slate-700 px-2 py-1 rounded text-emerald-400 font-bold"
+                                    />
+                                </div>
+                            ))}
+                            <div class="pt-2">
+                                <label class="block text-xs text-slate-400 mb-1">Aturan Pembuatan Gmail Bagi Pengguna</label>
+                                <textarea value={appSettings.gmailRulesText} onChange={e => setAppSettings({...appSettings, gmailRulesText: e.target.value})} class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs h-20"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // MENU 5: GMAIL TERKIRIM
+            if (activeTab === 'gmails') {
+                return (
+                    <div class="space-y-3">
+                        <h2 class="text-lg font-bold text-white">Pemeriksaan Kiriman Gmail ({gmails.length})</h2>
+                        {gmails.map((g, idx) => (
+                            <div key={g.id} class="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl space-y-2">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <p class="font-mono text-indigo-300 font-bold text-sm">#{idx+1}. {g.gmailName}</p>
+                                        <p class="text-xs text-slate-400">Pengirim: {g.userName}</p>
+                                    </div>
+                                    <span class="text-xs px-2 py-0.5 rounded font-bold bg-slate-800 text-slate-300">{g.status}</span>
+                                </div>
+                                {g.status === 'Menunggu' && (
+                                    <div class="flex space-x-2 pt-2 border-t border-slate-800">
+                                        <button onClick={() => {
+                                            setGmails(gmails.map(i => i.id === g.id ? {...i, status: 'Lolos'} : i));
+                                            setUsers(users.map(u => u.id === g.userId ? {...u, balance: u.balance + rates[0].rate} : u));
+                                            addNotif(g.userId, 'Gmail Disetujui', `Gmail ${g.gmailName} Lolos! Saldo bertambah.`);
+                                        }} class="flex-1 py-1.5 bg-emerald-600 text-xs font-bold rounded-xl">Bagus (Lolos)</button>
+                                        <button onClick={() => {
+                                            setGmails(gmails.map(i => i.id === g.id ? {...i, status: 'Tidak Lolos'} : i));
+                                            addNotif(g.userId, 'Gmail Ditolak', `Gmail ${g.gmailName} Tidak Lolos.`);
+                                        }} class="flex-1 py-1.5 bg-red-600 text-xs font-bold rounded-xl">Tidak Bagus</button>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                );
+            }
+
+            // MENU 6: PENARIKAN WALLET OWNER
+            if (activeTab === 'withdraws') {
+                return (
+                    <div class="space-y-3">
+                        <h2 class="text-lg font-bold text-white">Penarikan Wallet Pengguna</h2>
+                        {withdrawals.map(w => (
+                            <div key={w.id} class="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl space-y-2">
+                                <div class="flex justify-between">
+                                    <div>
+                                        <p class="font-bold text-white">{w.userName} - <span class="text-emerald-400">Rp{w.amount.toLocaleString()}</span></p>
+                                        <p class="text-xs text-slate-400">{w.method}: {w.targetAccount} a.n {w.ownerName}</p>
+                                    </div>
+                                    <span class="text-xs px-2 py-0.5 rounded font-bold bg-slate-800 text-slate-300">{w.status}</span>
+                                </div>
+                                {w.status === 'Menunggu' && (
+                                    <button onClick={() => {
+                                        setWithdrawals(withdrawals.map(i => i.id === w.id ? {...i, status: 'Selesai'} : i));
+                                        addNotif(w.userId, 'Penarikan Selesai', `Penarikan Rp${w.amount.toLocaleString()} telah dikirim.`);
+                                    }} class="w-full py-1.5 bg-indigo-600 text-xs font-bold rounded-xl">Tandai Selesai</button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                );
+            }
+
+            return null;
+        }
+
+        // ==========================================
+        // 3. DASHBOARD ANGGOTA / PENGGUNA
+        // ==========================================
+        function UserDashboard({ user, setUser, rates, appSettings, gmails, setGmails, withdrawals, setWithdrawals, referralClaims, setReferralClaims, activeTab, setActiveTab, addNotif, users }) {
+            const [gmailInput, setGmailInput] = useState('');
+            const [calcCount, setCalcCount] = useState(10);
+            const [withdrawAmt, setWithdrawAmt] = useState('');
+            const [withdrawMethod, setWithdrawMethod] = useState('DANA');
+            const [targetAccount, setTargetAccount] = useState('');
+            const [accountOwner, setAccountOwner] = useState('');
+
+            const myGmails = useMemo(() => gmails.filter(g => g.userId === user.id), [gmails, user.id]);
+
+            // Filter teman terdaftar & bayar
+            const myReferredFriends = useMemo(() => {
+                return users.filter(u => u.referredBy === user.id && u.paid);
+            }, [users, user.id]);
+
+            // Form Pengiriman Gmail Bebas Tanpa Batas
+            const handleGmailSubmit = (e) => {
+                e.preventDefault();
+                if (!user.paid) {
+                    alert("Anda belum dikonfirmasi oleh Owner! Silakan bayar pendaftaran QRIS terlebih dahulu.");
+                    return;
+                }
+                if (!gmailInput.includes('@gmail.com')) {
+                    alert("Alamat Gmail wajib menyertakan domain @gmail.com!");
+                    return;
+                }
+
+                const newEntry = {
+                    id: "GM-" + Date.now(),
+                    userId: user.id,
+                    userName: user.name,
+                    gmailName: gmailInput,
+                    status: 'Menunggu',
+                    date: new Date().toLocaleString('id-ID')
+                };
+
+                setGmails([newEntry, ...gmails]);
+                addNotif('OWNER', 'Kiriman Gmail Baru', `${user.name} mengirimkan Gmail: ${gmailInput}`);
+                setGmailInput('');
+                alert("Gmail berhasil dikirimkan ke Owner!");
+            };
+
+            const handleClaimReferral = (friendId) => {
+                if (referralClaims.includes(friendId)) {
+                    alert("Bonus referral ini sudah pernah Anda klaim!");
+                    return;
+                }
+
+                setUser({ ...user, balance: user.balance + appSettings.referralBonus });
+                setReferralClaims([...referralClaims, friendId]);
+                alert(`Selamat! Bonus referral Rp${appSettings.referralBonus.toLocaleString()} berhasil diklaim ke saldo Anda.`);
+            };
+
+            const calculateEarnings = () => {
+                const matched = rates.find(r => calcCount >= r.min && calcCount <= r.max) || rates[0];
+                return calcCount * matched.rate;
+            };
+
+            // MENU BERANDA PENGGUNA
+            if (activeTab === 'home') {
+                return (
+                    <div class="space-y-4">
+                        {!user.paid ? (
+                            <div class="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl text-center space-y-2">
+                                <span class="bg-amber-500 text-black text-[10px] font-bold px-2 py-0.5 rounded-full">Menunggu Konfirmasi Owner</span>
+                                <h3 class="font-bold text-white text-sm">QR Pembayaran Pendaftaran</h3>
+                                <p class="text-xs text-slate-300">Biaya: <span class="font-bold text-emerald-400">Rp{appSettings.regFee.toLocaleString()}</span></p>
+                                <div class="flex justify-center py-2">
+                                    <img src={appSettings.qrUrl} alt="QR Code" class="w-40 h-40 rounded-xl border border-slate-700 shadow-md" />
+                                </div>
+                                <p class="text-[11px] text-slate-400">Lakukan pembayaran ke QRIS di atas. Tugas hanya bisa dibuka setelah pembayaran dikonfirmasi Owner.</p>
+                            </div>
+                        ) : (
+                            <div class="bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-2xl flex justify-between items-center">
+                                <span class="text-xs text-emerald-400 font-bold">Status Pembayaran: Dikonfirmasi & Terverifikasi</span>
+                                <span>✅</span>
+                            </div>
+                        )}
+
+                        <div class="bg-gradient-to-r from-indigo-900 to-slate-900 border border-indigo-800/50 p-4 rounded-2xl">
+                            <p class="text-xs text-indigo-300">Total Saldo Terkumpul</p>
+                            <h2 class="text-3xl font-extrabold text-white mt-1">Rp{user.balance.toLocaleString()}</h2>
+                        </div>
+                    </div>
+                );
+            }
+
+            // MENU TUGAS
+            if (activeTab === 'tasks') {
+                return (
+                    <div class="space-y-4">
+                        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2">
+                            <h3 class="font-bold text-xs text-indigo-400">Tabel Rate Gmail</h3>
+                            {rates.map((r, i) => (
+                                <div key={i} class="flex justify-between text-xs py-1 border-b border-slate-800/60">
+                                    <span class="text-slate-400">{r.min} - {r.max} Gmail</span>
+                                    <span class="font-bold text-emerald-400">Rp{r.rate.toLocaleString()} / Gmail</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        {user.paid ? (
+                            <form onSubmit={handleGmailSubmit} class="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">
+                                <h3 class="font-bold text-sm text-white">Form Pengiriman Gmail (Bebas Input)</h3>
+                                <p class="text-xs text-slate-400">{appSettings.gmailRulesText}</p>
+                                <div>
+                                    <label class="block text-xs text-slate-300 mb-1">Gmail #{myGmails.length + 1}</label>
+                                    <input type="text" required value={gmailInput} onChange={e => setGmailInput(e.target.value)} placeholder="nama.acak123@gmail.com" class="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm" />
+                                </div>
+                                <button type="submit" class="w-full py-2.5 bg-indigo-600 font-bold text-xs rounded-xl text-white">Kirimkan Gmail</button>
+                            </form>
+                        ) : (
+                            <div class="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-center text-xs text-amber-400">
+                                🔒 Form Tugas terkunci! Selesaikan pembayaran QRIS dan tunggu konfirmasi Owner untuk membuka form pengiriman.
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+
+            // MENU KALKULATOR
+            if (activeTab === 'calc') {
+                return (
+                    <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
+                        <h3 class="font-bold text-base text-white">Kalkulator Estimasi Penghasilan</h3>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">Jumlah Gmail yang ingin dibuat:</label>
+                            <input 
+                                type="number" 
+                                value={calcCount} 
+                                onChange={e => setCalcCount(parseInt(e.target.value) || 0)} 
+                                class="w-full bg-slate-800 border border-slate-700 p-3 rounded-xl font-bold text-xl text-white"
+                            />
+                        </div>
+                        <div class="p-4 bg-indigo-950/50 rounded-xl border border-indigo-900/50 text-center">
+                            <p class="text-xs text-indigo-300">Perkiraan Hasil Pendapatan</p>
+                            <p class="text-2xl font-black text-emerald-400 mt-1">Rp{calculateEarnings().toLocaleString()}</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            // MENU UNDANG / REFERRAL
+            if (activeTab === 'referral') {
+                const shareLink = `${appSettings.appShareUrl}?ref=${user.id}`;
+
+                return (
+                    <div class="space-y-4">
+                        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">
+                            <h3 class="font-bold text-sm text-white">Undang Teman & Dapatkan Bonus</h3>
+                            <p class="text-xs text-slate-400">Dapatkan <span class="font-bold text-emerald-400">Rp{appSettings.referralBonus.toLocaleString()}</span> setiap kali teman mendaftar dan dikonfirmasi Owner.</p>
+
+                            <div>
+                                <label class="block text-xs text-slate-400 mb-1">Link Referral Unik Anda</label>
+                                <input type="text" readOnly value={shareLink} class="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-xs font-mono text-indigo-300" />
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-2 pt-1">
+                                <a href={`https://wa.me/?text=${encodeURIComponent('Gabung Gmail Cuan sekarang: ' + shareLink)}`} target="_blank" rel="noreferrer" class="py-2 bg-emerald-600 text-center rounded-xl text-xs font-bold text-white">
+                                    Bagikan WA
+                                </a>
+                                <button onClick={() => { navigator.clipboard.writeText(shareLink); alert("Link referral berhasil disalin!"); }} class="py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-bold text-slate-200 border border-slate-700">
+                                    Salin Link
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* TABEL TEMAN & KLAIM REFERRAL */}
+                        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">
+                            <h4 class="font-bold text-xs text-slate-300">Daftar Teman Mendaftar ({myReferredFriends.length})</h4>
+                            {myReferredFriends.length === 0 ? (
+                                <p class="text-xs text-slate-500 italic">Belum ada teman yang dikonfirmasi menggunakan link referral Anda.</p>
+                            ) : (
+                                myReferredFriends.map(f => {
+                                    const isClaimed = referralClaims.includes(f.id);
+                                    return (
+                                        <div key={f.id} class="bg-slate-800/50 p-3 rounded-xl flex justify-between items-center text-xs">
+                                            <div>
+                                                <p class="font-bold text-white">{f.name}</p>
+                                                <p class="text-[10px] text-slate-400">Terdaftar & Lunas</p>
+                                            </div>
+                                            {isClaimed ? (
+                                                <span class="text-emerald-400 text-[10px] font-bold">Sudah Diklaim</span>
+                                            ) : (
+                                                <button onClick={() => handleClaimReferral(f.id)} class="px-3 py-1.5 bg-emerald-600 text-white font-bold rounded-lg text-xs">
+                                                    Klaim Rp{appSettings.referralBonus.toLocaleString()}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            // MENU WALLET PENGGUNA
+            if (activeTab === 'wallet') {
+                return (
+                    <form onSubmit={(e) => {
+                        e.preventDefault();
+                        const amt = parseInt(withdrawAmt);
+                        if (amt < appSettings.minWithdraw) { alert(`Min. Rp${appSettings.minWithdraw.toLocaleString()}`); return; }
+                        if (amt > user.balance) { alert("Saldo tidak cukup!"); return; }
+
+                        const newWd = { id: "WD-" + Date.now(), userId: user.id, userName: user.name, amount: amt, method: withdrawMethod, targetAccount, ownerName: accountOwner, status: 'Menunggu', date: new Date().toLocaleString('id-ID') };
+                        setUser({...user, balance: user.balance - amt});
+                        setWithdrawals([newWd, ...withdrawals]);
+                        addNotif('OWNER', 'Penarikan Baru', `${user.name} meminta penarikan Rp${amt.toLocaleString()}`);
+                        setWithdrawAmt('');
+                        alert("Permintaan penarikan berhasil dikirim!");
+                    }} class="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">
+                        <h3 class="font-bold text-sm text-white">Penarikan Saldo Wallet</h3>
+                        <p class="text-xs text-slate-400">Tersedia: Rp{user.balance.toLocaleString()}</p>
+                        <div>
+                            <label class="block text-xs text-slate-300 mb-1">Metode Penarikan</label>
+                            <select value={withdrawMethod} onChange={e => setWithdrawMethod(e.target.value)} class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs">
+                                {appSettings.walletMethods.map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                        </div>
+                        <input type="text" required value={targetAccount} onChange={e => setTargetAccount(e.target.value)} placeholder="Nomor Wallet / Rekening Bank" class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs" />
+                        <input type="text" required value={accountOwner} onChange={e => setAccountOwner(e.target.value)} placeholder="Nama Pemilik Akun / Rekening" class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs" />
+                        <input type="number" required value={withdrawAmt} onChange={e => setWithdrawAmt(e.target.value)} placeholder={`Minimal Rp${appSettings.minWithdraw}`} class="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs font-bold text-emerald-400" />
+                        <button type="submit" class="w-full py-2.5 bg-emerald-600 font-bold text-xs rounded-xl text-white">Ajukan Penarikan</button>
+                    </form>
+                );
+            }
+
+            // MENU RIWAYAT
+            if (activeTab === 'history') {
+                return (
+                    <div class="space-y-3">
+                        <h3 class="font-bold text-sm text-white">Riwayat Gmail & Aktivitas</h3>
+                        {myGmails.map(g => (
+                            <div key={g.id} class="bg-slate-900 border border-slate-800 p-3 rounded-xl flex justify-between items-center text-xs">
+                                <div>
+                                    <p class="font-mono text-indigo-300">{g.gmailName}</p>
+                                    <p class="text-[10px] text-slate-500">{g.date}</p>
+                                </div>
+                                <span class="font-bold text-slate-300">{g.status}</span>
+                            </div>
+                        ))}
+                    </div>
+                );
+            }
+
+            return null;
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
